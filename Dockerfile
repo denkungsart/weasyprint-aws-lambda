@@ -1,4 +1,4 @@
-FROM public.ecr.aws/awsguru/aws-lambda-adapter:1.0.1 AS lambda-web-adapter
+FROM public.ecr.aws/awsguru/aws-lambda-adapter:1.1.0 AS lambda-web-adapter
 
 FROM ghcr.io/schweizerischebundesbahnen/weasyprint-service:69.0.0
 
