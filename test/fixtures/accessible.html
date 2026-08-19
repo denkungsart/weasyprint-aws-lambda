@@ -19,12 +19,30 @@
       h1 {
         color: #164e63;
       }
+
+      figure {
+        margin: 1rem 0;
+      }
+
+      figure img {
+        height: 24mm;
+        width: 24mm;
+      }
     </style>
   </head>
   <body>
     <main>
       <h1>Accessible PDF smoke test</h1>
       <p>This text must survive conversion and remain extractable.</p>
+      <figure>
+        <img
+          alt="Green circle containing a white check mark"
+          height="96"
+          width="96"
+          src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI5NiIgaGVpZ2h0PSI5NiIgdmlld0JveD0iMCAwIDk2IDk2Ij48Y2lyY2xlIGN4PSI0OCIgY3k9IjQ4IiByPSI0MCIgZmlsbD0iIzE1ODAzZCIvPjxwYXRoIGQ9Ik0yNyA0OWwxMyAxMyAyOS0zMSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSI4Ii8+PC9zdmc+"
+        >
+        <figcaption>Native SVG rendering check</figcaption>
+      </figure>
     </main>
   </body>
 </html>

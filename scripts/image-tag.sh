@@ -15,15 +15,22 @@ mapfile -t versions < <(
       adapter = $2
     }
 
+    $1 == "ARG" && $2 ~ /^LAMBDA_WRAPPER_REVISION=/ {
+      sub(/^LAMBDA_WRAPPER_REVISION=/, "", $2)
+      wrapper = $2
+    }
+
     END {
       print weasyprint
       print adapter
+      print wrapper
     }
   ' "${dockerfile}"
 )
 
 weasyprint_version="${versions[0]:-}"
 adapter_version="${versions[1]:-}"
+wrapper_revision="${versions[2]:-0}"
 
 if [[ -z "${weasyprint_version}" || -z "${adapter_version}" ]]; then
   printf 'Could not find both pinned base-image versions in %s.\n' "${dockerfile}" >&2
@@ -45,4 +52,10 @@ if [[ ! "${adapter_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 1
 fi
 
-printf 'v%s-lwa%s-arm64\n' "${weasyprint_version}" "${adapter_version}"
+if [[ ! "${wrapper_revision}" =~ ^[0-9]+$ ]]; then
+  printf 'Unexpected Lambda wrapper revision: %s\n' "${wrapper_revision}" >&2
+  exit 1
+fi
+
+printf 'v%s-lwa%s-r%s-arm64\n' \
+  "${weasyprint_version}" "${adapter_version}" "${wrapper_revision}"

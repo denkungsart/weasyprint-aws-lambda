@@ -87,6 +87,19 @@ if [[ "${healthy}" != "true" ]]; then
   exit 1
 fi
 
+if docker exec "${container}" pgrep -f 'chrome.*--headless' >/dev/null 2>&1; then
+  printf 'Chromium must not run in the Lambda-oriented image.\n' >&2
+  exit 1
+fi
+
+curl --fail --silent --show-error \
+  --output "${tmp_dir}/health.json" \
+  "${base_url}/health?detailed=true"
+
+grep -Fq '"status":"healthy"' "${tmp_dir}/health.json"
+grep -Fq '"chromium_running":false' "${tmp_dir}/health.json"
+grep -Fq '"health_monitoring_enabled":false' "${tmp_dir}/health.json"
+
 curl --fail --silent --show-error \
   --request POST \
   --header 'Content-Type: text/html; charset=utf-8' \
@@ -119,6 +132,7 @@ grep -Eq '^Tagged:[[:space:]]+yes$' "${tmp_dir}/pdfinfo.txt"
 grep -Eq '^Pages:[[:space:]]+1$' "${tmp_dir}/pdfinfo.txt"
 grep -Eq '^Page size:.*A4' "${tmp_dir}/pdfinfo.txt"
 grep -Fq 'This text must survive conversion and remain extractable.' "${tmp_dir}/smoke.txt"
+grep -Fq 'Native SVG rendering check' "${tmp_dir}/smoke.txt"
 
 printf 'Smoke test passed for %s (%s).\n' \
   "${image}" "$(docker image inspect --format '{{.Architecture}}' "${image}")"

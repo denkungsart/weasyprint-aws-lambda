@@ -3,7 +3,7 @@ name: Publish to ECR
 on:
   push:
     tags:
-      - "v*-lwa*-arm64"
+      - "v*-lwa*-r*-arm64"
   workflow_dispatch:
     inputs:
       tag:
@@ -34,7 +34,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           tag="${INPUT_TAG:-${REF_TAG}}"
-          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-lwa[0-9]+\.[0-9]+\.[0-9]+-arm64$ ]]; then
+          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-lwa[0-9]+\.[0-9]+\.[0-9]+-r[0-9]+-arm64$ ]]; then
             echo "Invalid release tag: ${tag}" >&2
             exit 1
           fi
@@ -45,7 +45,7 @@ jobs:
         with:
           ref: ${{ steps.release.outputs.tag }}
 
-      - name: Verify tag matches pinned images
+      - name: Verify tag matches release metadata
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         shell: bash

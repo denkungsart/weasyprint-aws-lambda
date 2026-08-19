@@ -2,7 +2,7 @@
 
 This repository packages the
 [SBB WeasyPrint service](https://github.com/SchweizerischeBundesbahnen/weasyprint-service)
-with the [AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter).
+with the [AWS Lambda Web Adapter](https://github.com/aws/aws-lambda-web-adapter).
 The result is a non-root, ARM64 container image that can run behind an
 IAM-protected Lambda Function URL without adding Lambda-specific code to the
 upstream application.
@@ -16,13 +16,16 @@ existing PDF path during validation.
 
 - SBB WeasyPrint service: `69.0.0`
 - AWS Lambda Web Adapter: `1.0.1`
+- Lambda wrapper revision: `1`
 - Application port: `9080`
 - Lambda invoke mode: `response_stream`
 
-Both upstream versions are pinned in the [Dockerfile](Dockerfile). Dependabot
-opens updates for the container bases and GitHub Actions. A release tag encodes
-both versions, for example `v69.0.0-lwa1.0.1-arm64`, so an existing artifact is
-never silently replaced by a different adapter or renderer.
+The upstream versions and wrapper revision are pinned in the
+[Dockerfile](Dockerfile). Dependabot opens updates for the container bases and
+GitHub Actions. A release tag encodes all three values, for example
+`v69.0.0-lwa1.0.1-r1-arm64`, so an existing artifact is never silently replaced
+by a different adapter, renderer, or wrapper implementation. Increment the
+wrapper revision whenever behavior changes without an upstream version change.
 
 ## Local build and smoke test
 
@@ -41,6 +44,8 @@ document and verifies:
 - the image keeps the upstream non-root `appuser`;
 - the Lambda Web Adapter executable is present;
 - the service becomes healthy;
+- no Chromium process is started;
+- an SVG image is rendered through WeasyPrint's native SVG support;
 - the response is a structurally valid, tagged, one-page A4 PDF;
 - the HTML title and expected text survive conversion.
 
@@ -64,10 +69,11 @@ curl --fail \
 ## CI and publishing
 
 Pull requests and pushes to `main` build and smoke-test the image on a native
-GitHub-hosted ARM64 runner. When either pinned image version changes on `main`,
-the tag workflow creates the combined immutable Git tag and dispatches the ECR
-workflow. The ECR workflow checks out that exact tag, rebuilds and smoke-tests it
-on ARM64, then pushes the already-tested local image.
+GitHub-hosted ARM64 runner. When a pinned image version or the wrapper revision
+changes on `main`, the tag workflow creates the combined immutable Git tag and
+dispatches the ECR workflow. The ECR workflow checks out that exact tag,
+rebuilds and smoke-tests it on ARM64, then pushes the already-tested local
+image.
 
 Publishing expects:
 
@@ -87,16 +93,38 @@ For the initial wkhtmltopdf replacement trial, start with:
 | Setting | Initial value |
 | --- | --- |
 | Architecture | `arm64` |
-| Memory | 2048 MiB |
-| Timeout | 120 seconds |
+| Memory | 4096 MiB |
+| Timeout | 180 seconds |
 | Ephemeral storage | 1024 MiB |
 | Function URL authorization | `AWS_IAM` |
 | Function URL invoke mode | `RESPONSE_STREAM` |
 
-The image already configures the adapter for port `9080`, the `/health`
-readiness check, and response streaming. It redirects the upstream application's
-home, cache, and logs to `/tmp`, disables the unused metrics listener, and asks
-the service to reclaim memory after each conversion.
+The image configures the adapter for port `9080`, the `/health` readiness check,
+asynchronous initialization, and response streaming. It redirects the upstream
+application's home, cache, and logs to `/tmp`, disables the unused metrics
+listener, and asks the service to reclaim memory after each conversion. Lambda
+environment variables can override these image defaults.
+
+## Native SVG mode
+
+The upstream service starts Playwright and Chromium to rasterize SVG images.
+Standard Lambda execution environments freeze between invocations, which can
+leave Playwright's browser connection unavailable after thaw and make the
+upstream `/health` endpoint return `503` even while ordinary PDF generation
+works.
+
+This image therefore does not start Chromium. Its small Lambda-specific ASGI
+wrapper preserves SVG input for WeasyPrint's native renderer and reports health
+for the HTTP/PDF service itself. In detailed health output,
+`chromium_running: false` and `health_monitoring_enabled: false` are intentional,
+healthy values for this image.
+
+Native SVG avoids the browser process, reduces initialization work, preserves
+vector artwork, and remains available after Lambda freeze/thaw. Validate complex
+SVGs that depend on browser-only CSS, scripts, or unusual external resources
+before migration. For accessible figures, prefer an `<img>` with meaningful
+`alt` text and an SVG data URL; the upstream inline-`<svg>` preprocessing does
+not preserve every ARIA attribute when it creates an image element.
 
 Version 69.0.0 of the upstream service does not provide application-level
 authentication. Do not expose it through a Function URL with `NONE`

@@ -1,4 +1,4 @@
-name: Tag base-image updates
+name: Tag image updates
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Create immutable combined-version tag
+      - name: Create immutable release tag
         env:
           BEFORE_SHA: ${{ github.event.before }}
           GH_TOKEN: ${{ github.token }}
@@ -39,7 +39,7 @@ jobs:
           fi
 
           if [[ -n "${previous_tag}" && "${tag}" == "${previous_tag}" ]]; then
-            echo "Base-image versions are unchanged (${tag}); no tag is needed."
+            echo "Release inputs are unchanged (${tag}); no tag is needed."
             exit 0
           fi
 
