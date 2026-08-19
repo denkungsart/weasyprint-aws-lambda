@@ -1,0 +1,58 @@
+name: Tag base-image updates
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Create immutable combined-version tag
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          tag="$(scripts/image-tag.sh Dockerfile)"
+          previous_tag=""
+
+          if [[ -n "${BEFORE_SHA:-}" && ! "${BEFORE_SHA}" =~ ^0+$ ]] && \
+             git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            previous_tag="$(git show "${BEFORE_SHA}:Dockerfile" | scripts/image-tag.sh - 2>/dev/null || true)"
+          fi
+
+          if [[ -n "${previous_tag}" && "${tag}" == "${previous_tag}" ]]; then
+            echo "Base-image versions are unchanged (${tag}); no tag is needed."
+            exit 0
+          fi
+
+          if git rev-parse --quiet --verify "refs/tags/${tag}" >/dev/null; then
+            existing_sha="$(git rev-list --max-count=1 "refs/tags/${tag}")"
+            if [[ "${existing_sha}" != "${GITHUB_SHA}" ]]; then
+              echo "Tag ${tag} already points to ${existing_sha}; refusing to move it." >&2
+              exit 1
+            fi
+            echo "Tag ${tag} already points to this commit."
+          else
+            git tag "${tag}" "${GITHUB_SHA}"
+            git push origin "refs/tags/${tag}"
+          fi
+
+          gh workflow run ecr.yml --ref "${GITHUB_REF_NAME}" --field "tag=${tag}"
