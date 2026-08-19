@@ -1,0 +1,122 @@
+name: Publish to ECR
+
+on:
+  push:
+    tags:
+      - "v*-lwa*-arm64"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing immutable tag to publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: eu-west-1
+  ECR_REPOSITORY: weasyprint-aws-lambda
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+
+    steps:
+      - name: Resolve release tag
+        id: release
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tag="${INPUT_TAG:-${REF_TAG}}"
+          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-lwa[0-9]+\.[0-9]+\.[0-9]+-arm64$ ]]; then
+            echo "Invalid release tag: ${tag}" >&2
+            exit 1
+          fi
+          echo "tag=${tag}" >>"${GITHUB_OUTPUT}"
+
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+
+      - name: Verify tag matches pinned images
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected_tag="$(scripts/image-tag.sh Dockerfile)"
+          if [[ "${RELEASE_TAG}" != "${expected_tag}" ]]; then
+            echo "Release tag ${RELEASE_TAG} does not match Dockerfile tag ${expected_tag}." >&2
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build ARM64 image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          tags: weasyprint-aws-lambda:release
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install PDF inspection tools
+        run: sudo apt-get update && sudo apt-get install --yes poppler-utils qpdf
+
+      - name: Run smoke test
+        env:
+          EXPECTED_ARCHITECTURE: arm64
+        run: test/smoke.sh weasyprint-aws-lambda:release
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Refuse to overwrite an existing release
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          lookup_output=""
+          if lookup_output="$(aws ecr describe-images \
+            --repository-name "${ECR_REPOSITORY}" \
+            --image-ids "imageTag=${RELEASE_TAG}" 2>&1)"; then
+            echo "ECR tag ${RELEASE_TAG} already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+
+          if [[ "${lookup_output}" != *ImageNotFoundException* ]]; then
+            echo "Could not verify that the ECR tag is unused:" >&2
+            echo "${lookup_output}" >&2
+            exit 1
+          fi
+
+      - name: Push tested image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote_image="${ECR_REGISTRY}/${ECR_REPOSITORY}:${RELEASE_TAG}"
+          docker tag weasyprint-aws-lambda:release "${remote_image}"
+          docker push "${remote_image}"
+          docker buildx imagetools inspect "${remote_image}"
