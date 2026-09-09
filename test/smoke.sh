@@ -33,9 +33,11 @@ if [[ ! -f "${fixture}" ]]; then
   exit 1
 fi
 
-image_user="$(docker image inspect --format '{{.Config.User}}' "${image}")"
-if [[ "${image_user}" != "appuser" ]]; then
-  printf 'Expected image user appuser, got: %s\n' "${image_user:-<empty>}" >&2
+# Resolve the effective identity so named and numeric USER declarations both work.
+image_uid="$(docker run --rm --entrypoint /usr/bin/id "${image}" -u)"
+appuser_uid="$(docker run --rm --entrypoint /usr/bin/id "${image}" -u appuser)"
+if [[ "${image_uid}" == "0" || "${image_uid}" != "${appuser_uid}" ]]; then
+  printf 'Expected non-root appuser UID %s, got: %s\n' "${appuser_uid}" "${image_uid}" >&2
   exit 1
 fi
 
@@ -51,7 +53,10 @@ fi
 docker run --rm --entrypoint /bin/sh "${image}" \
   -c 'test -x /opt/extensions/lambda-adapter'
 
+api_key="weasyprint-smoke-test-key-not-for-deployment"
+
 docker run --detach \
+  --env "API_KEY=${api_key}" \
   --name "${container}" \
   --read-only \
   --tmpfs /tmp:rw,exec,mode=1777,size=1024m \
@@ -100,8 +105,23 @@ grep -Fq '"status":"healthy"' "${tmp_dir}/health.json"
 grep -Fq '"chromium_running":false' "${tmp_dir}/health.json"
 grep -Fq '"health_monitoring_enabled":false' "${tmp_dir}/health.json"
 
+# Both conversion routes must reject missing or incorrect credentials.
+for route in html html-with-attachments; do
+  for supplied_key in "" "incorrect-key"; do
+    status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+      --request POST --header "X-API-Key: ${supplied_key}" \
+      --header 'Content-Type: text/html; charset=utf-8' \
+      --data-binary "@${fixture}" "${base_url}/convert/${route}")"
+    if [[ "${status}" != "401" ]]; then
+      printf 'Expected 401 for rejected credentials on %s, got: %s\n' "${route}" "${status}" >&2
+      exit 1
+    fi
+  done
+done
+
 curl --fail --silent --show-error \
   --request POST \
+  --header "X-API-Key: ${api_key}" \
   --header 'Content-Type: text/html; charset=utf-8' \
   --data-binary "@${fixture}" \
   --dump-header "${tmp_dir}/headers.txt" \
