@@ -2,7 +2,7 @@ FROM public.ecr.aws/awsguru/aws-lambda-adapter:1.0.1 AS lambda-web-adapter
 
 FROM ghcr.io/schweizerischebundesbahnen/weasyprint-service:69.0.2
 
-ARG LAMBDA_WRAPPER_REVISION=1
+ARG LAMBDA_WRAPPER_REVISION=2
 
 COPY --from=lambda-web-adapter /lambda-adapter /opt/extensions/lambda-adapter
 COPY --chown=appuser:appuser lambda_app.py /opt/weasyprint/lambda_app.py
