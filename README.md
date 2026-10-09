@@ -14,7 +14,7 @@ existing PDF path during validation.
 
 ## Pinned components
 
-- SBB WeasyPrint service: `69.0.2`
+- SBB WeasyPrint service: `70.0.4`
 - AWS Lambda Web Adapter: `1.0.1`
 - Lambda wrapper revision: `3`
 - Application port: `9080`
@@ -115,8 +115,11 @@ upstream `/health` endpoint return `503` even while ordinary PDF generation
 works.
 
 This image therefore does not start Chromium. Its small Lambda-specific ASGI
-wrapper preserves SVG input for WeasyPrint's native renderer and reports health
-for the HTTP/PDF service itself. In detailed health output,
+wrapper keeps the upstream startup and shutdown but turns the Chromium start
+and stop into no-ops, preserves SVG input for WeasyPrint's native renderer, and
+reports health for the HTTP/PDF service itself. It checks at startup that the
+upstream hooks it patches still exist, so an incompatible upstream release fails
+the smoke test instead of failing requests. In detailed health output,
 `chromium_running: false` and `health_monitoring_enabled: false` are intentional,
 healthy values for this image.
 
