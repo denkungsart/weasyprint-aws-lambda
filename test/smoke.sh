@@ -4,6 +4,7 @@ set -Eeuo pipefail
 image="${1:-weasyprint-aws-lambda:test}"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 fixture="${script_dir}/fixtures/accessible.html"
+external_image_fixture="${script_dir}/fixtures/external-image.html"
 container="weasyprint-smoke-$$"
 tmp_dir="$(mktemp -d)"
 
@@ -21,7 +22,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-for command in docker curl pdfinfo pdftotext qpdf; do
+for command in docker curl pdfimages pdfinfo pdftotext qpdf; do
   if ! command -v "${command}" >/dev/null 2>&1; then
     printf 'Required command is missing: %s\n' "${command}" >&2
     exit 1
@@ -153,6 +154,21 @@ grep -Eq '^Pages:[[:space:]]+1$' "${tmp_dir}/pdfinfo.txt"
 grep -Eq '^Page size:.*A4' "${tmp_dir}/pdfinfo.txt"
 grep -Fq 'This text must survive conversion and remain extractable.' "${tmp_dir}/smoke.txt"
 grep -Fq 'Native SVG rendering check' "${tmp_dir}/smoke.txt"
+
+# An image on a public HTTPS host must be fetched over verified TLS and embedded,
+# not replaced by its alt text.
+curl --fail --silent --show-error \
+  --request POST \
+  --header "X-API-Key: ${api_key}" \
+  --header 'Content-Type: text/html; charset=utf-8' \
+  --data-binary "@${external_image_fixture}" \
+  --output "${tmp_dir}/external-image.pdf" \
+  "${base_url}/convert/html?file_name=external-image.pdf"
+
+if [[ "$(pdfimages -list "${tmp_dir}/external-image.pdf" | tail -n +3 | wc -l)" -lt 1 ]]; then
+  printf 'The external HTTPS image was not embedded in the PDF.\n' >&2
+  exit 1
+fi
 
 printf 'Smoke test passed for %s (%s).\n' \
   "${image}" "$(docker image inspect --format '{{.Architecture}}' "${image}")"
