@@ -14,9 +14,9 @@ existing PDF path during validation.
 
 ## Pinned components
 
-- SBB WeasyPrint service: `69.0.0`
+- SBB WeasyPrint service: `69.0.2`
 - AWS Lambda Web Adapter: `1.0.1`
-- Lambda wrapper revision: `1`
+- Lambda wrapper revision: `3`
 - Application port: `9080`
 - Lambda invoke mode: `response_stream`
 
@@ -46,6 +46,7 @@ document and verifies:
 - the service becomes healthy;
 - no Chromium process is started;
 - an SVG image is rendered through WeasyPrint's native SVG support;
+- an image on a public HTTPS host is loaded over verified TLS and embedded;
 - the response is a structurally valid, tagged, one-page A4 PDF;
 - the HTML title and expected text survive conversion.
 
