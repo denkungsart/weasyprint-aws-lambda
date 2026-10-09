@@ -93,6 +93,12 @@ if [[ "${healthy}" != "true" ]]; then
   exit 1
 fi
 
+# Without pgrep in the image the check below would pass vacuously.
+if ! docker exec "${container}" sh -c 'command -v pgrep' >/dev/null 2>&1; then
+  printf 'pgrep is missing from the image; cannot check for Chromium.\n' >&2
+  exit 1
+fi
+
 if docker exec "${container}" pgrep -f 'chrome.*--headless' >/dev/null 2>&1; then
   printf 'Chromium must not run in the Lambda-oriented image.\n' >&2
   exit 1
