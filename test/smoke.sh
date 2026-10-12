@@ -161,8 +161,9 @@ grep -Eq '^Page size:.*A4' "${tmp_dir}/pdfinfo.txt"
 grep -Fq 'This text must survive conversion and remain extractable.' "${tmp_dir}/smoke.txt"
 grep -Fq 'Native SVG rendering check' "${tmp_dir}/smoke.txt"
 
-# An image on a public HTTPS host must be fetched over verified TLS and embedded,
-# not replaced by its alt text.
+# Images on a public HTTPS host must be fetched over verified TLS, loaded in
+# parallel before the conversion, and embedded rather than replaced by their alt
+# text. One that cannot be loaded still falls back to its alt text.
 curl --fail --silent --show-error \
   --request POST \
   --header "X-API-Key: ${api_key}" \
@@ -171,8 +172,22 @@ curl --fail --silent --show-error \
   --output "${tmp_dir}/external-image.pdf" \
   "${base_url}/convert/html?file_name=external-image.pdf"
 
-if [[ "$(pdfimages -list "${tmp_dir}/external-image.pdf" | tail -n +3 | wc -l)" -lt 1 ]]; then
-  printf 'The external HTTPS image was not embedded in the PDF.\n' >&2
+if [[ "$(pdfimages -list "${tmp_dir}/external-image.pdf" | tail -n +3 | wc -l)" -lt 2 ]]; then
+  printf 'The external HTTPS images were not embedded in the PDF.\n' >&2
+  exit 1
+fi
+
+pdftotext "${tmp_dir}/external-image.pdf" "${tmp_dir}/external-image.txt"
+if ! grep -Fq 'Missing external image falls back to its alt text' "${tmp_dir}/external-image.txt"; then
+  printf 'The missing external image did not fall back to its alt text.\n' >&2
+  exit 1
+fi
+
+# Written to a file first: grep -q stops reading at the first match, and under
+# pipefail the SIGPIPE that leaves docker logs with would fail the check.
+docker logs "${container}" >"${tmp_dir}/container.log" 2>&1
+if ! grep -Fq 'Prefetched 3 external image(s)' "${tmp_dir}/container.log"; then
+  printf 'The external images were not prefetched.\n' >&2
   exit 1
 fi
 

@@ -16,7 +16,7 @@ existing PDF path during validation.
 
 - SBB WeasyPrint service: `70.0.4`
 - AWS Lambda Web Adapter: `1.0.1`
-- Lambda wrapper revision: `3`
+- Lambda wrapper revision: `4`
 - Application port: `9080`
 - Lambda invoke mode: `response_stream`
 
@@ -140,6 +140,21 @@ Lambda's documented payload limits still apply: buffered request payloads are
 limited to 6 MB, while a streamed response can be up to 200 MB. See the
 [Lambda quotas](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html)
 and [Function URL invoke modes](https://docs.aws.amazon.com/lambda/latest/dg/config-rs-invoke-furls.html).
+
+## Parallel image loading
+
+WeasyPrint loads the images of a document one after another while it lays the
+document out, which adds the latency of every picture to the conversion. Before
+converting, the wrapper therefore collects the distinct `http(s)` URLs of all
+`<img src>` elements and loads them in parallel, each through the upstream
+`PolicyUrlFetcher`, so the same policy, size, content-type, and timeout checks
+apply. WeasyPrint then receives the prefetched responses from memory; an image
+that failed to load raises the same error as before and falls back to its alt
+text. Other resources, such as stylesheets, fonts, and CSS background images,
+are still loaded by WeasyPrint itself.
+
+`EXTERNAL_RESOURCES_PREFETCH_WORKERS` sets how many images load at the same
+time (default `16`).
 
 ## Accessibility and migration notes
 
