@@ -183,7 +183,10 @@ if ! grep -Fq 'Missing external image falls back to its alt text' "${tmp_dir}/ex
   exit 1
 fi
 
-if ! docker logs "${container}" 2>&1 | grep -Fq 'Prefetched 3 external image(s)'; then
+# Written to a file first: grep -q stops reading at the first match, and under
+# pipefail the SIGPIPE that leaves docker logs with would fail the check.
+docker logs "${container}" >"${tmp_dir}/container.log" 2>&1
+if ! grep -Fq 'Prefetched 3 external image(s)' "${tmp_dir}/container.log"; then
   printf 'The external images were not prefetched.\n' >&2
   exit 1
 fi
