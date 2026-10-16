@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import time
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from typing import Any
@@ -15,6 +16,8 @@ import uvicorn
 import weasyprint  # type: ignore[import-untyped]
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, Query, Response
+from starlette.responses import PlainTextResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from weasyprint import html as weasyprint_html  # type: ignore[import-untyped]
 from weasyprint.urls import URLFetcherResponse  # type: ignore[import-untyped]
 
@@ -48,15 +51,21 @@ prefetched_images: ContextVar[dict[str, URLFetcherResponse | Exception] | None] 
 )
 
 
+def positive_int_from_env(name: str, default: int) -> int:
+    """Read a positive number from the environment, or the default if it is unset or invalid."""
+
+    configured = os.environ.get(name, "").strip()
+    try:
+        value = int(configured) if configured else default
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
 def get_prefetch_workers() -> int:
     """Read how many images may load at the same time."""
 
-    configured = os.environ.get(PREFETCH_WORKERS_VAR, "").strip()
-    try:
-        workers = int(configured) if configured else DEFAULT_PREFETCH_WORKERS
-    except ValueError:
-        return DEFAULT_PREFETCH_WORKERS
-    return workers if workers > 0 else DEFAULT_PREFETCH_WORKERS
+    return positive_int_from_env(PREFETCH_WORKERS_VAR, DEFAULT_PREFETCH_WORKERS)
 
 
 def remote_image_urls(parsed_html: BeautifulSoup, base_url: str | None) -> list[str]:
@@ -127,6 +136,97 @@ async def generate_pdf_with_prefetched_images(parsed_html: BeautifulSoup, html_p
         return await upstream_generate_pdf(parsed_html, html_parser, render, *args, **kwargs)
     finally:
         prefetched_images.reset(token)
+
+
+GZIP_MAX_INFLATED_BYTES_VAR = "GZIP_REQUEST_MAX_INFLATED_BYTES"
+DEFAULT_GZIP_MAX_INFLATED_BYTES = 64 * 1024 * 1024
+
+
+class InflatedBodyTooLarge(Exception):
+    """A gzipped request body inflates beyond the configured limit."""
+
+
+def get_gzip_max_inflated_bytes() -> int:
+    """Read how large a gzipped request body may become once inflated."""
+
+    return positive_int_from_env(GZIP_MAX_INFLATED_BYTES_VAR, DEFAULT_GZIP_MAX_INFLATED_BYTES)
+
+
+def inflate_gzip(body: bytes, limit: int) -> bytes:
+    """Inflate a single gzip member, stopping as soon as it exceeds the limit."""
+
+    inflater = zlib.decompressobj(wbits=zlib.MAX_WBITS | 16)
+    inflated = inflater.decompress(body, limit + 1)
+    if len(inflated) > limit:
+        raise InflatedBodyTooLarge
+    if not inflater.eof:
+        raise zlib.error("incomplete gzip stream")
+    if inflater.unused_data:
+        raise zlib.error("unexpected data after the gzip stream")
+    return inflated
+
+
+class GzipRequestBody:
+    """Inflate request bodies sent with Content-Encoding: gzip.
+
+    Lambda limits a buffered request payload to 6 MB, while HTML compresses
+    more than tenfold, so clients can send far longer documents compressed.
+    Upstream decodes the body as it arrives and knows nothing of the encoding,
+    so the body is inflated and the header removed before upstream sees them.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not is_gzip_encoded(scope):
+            await self.app(scope, receive, send)
+            return
+
+        body = b""
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            body += message.get("body", b"")
+            if not message.get("more_body", False):
+                break
+
+        try:
+            inflated = inflate_gzip(body, get_gzip_max_inflated_bytes())
+        except InflatedBodyTooLarge:
+            response = PlainTextResponse("Inflated request body is too large", status_code=413)
+            await response(scope, receive, send)
+            return
+        except zlib.error as e:
+            response = PlainTextResponse(f"Cannot inflate gzip request body: {e}", status_code=400)
+            await response(scope, receive, send)
+            return
+
+        headers = [
+            (name, value)
+            for name, value in scope["headers"]
+            if name not in (b"content-encoding", b"content-length")
+        ]
+        headers.append((b"content-length", str(len(inflated)).encode("latin-1")))
+
+        body_sent = False
+
+        async def receive_inflated() -> Message:
+            nonlocal body_sent
+            if body_sent:
+                return await receive()
+            body_sent = True
+            return {"type": "http.request", "body": inflated, "more_body": False}
+
+        await self.app({**scope, "headers": headers}, receive_inflated, send)
+
+
+def is_gzip_encoded(scope: Scope) -> bool:
+    """Whether the request body is encoded with gzip alone."""
+
+    encodings = [value for name, value in scope["headers"] if name == b"content-encoding"]
+    return len(encodings) == 1 and encodings[0].strip().lower() == b"gzip"
 
 
 async def skip_chromium_start(_self: ChromiumManager) -> None:
@@ -200,6 +300,7 @@ weasyprint_controller.SvgProcessor = NativeSvgProcessor
 upstream_generate_pdf = getattr(weasyprint_controller, GENERATE_PDF)
 setattr(weasyprint_controller, GENERATE_PDF, generate_pdf_with_prefetched_images)
 weasyprint_controller.PolicyUrlFetcher = PrefetchedUrlFetcher
+app.add_middleware(GzipRequestBody)
 app.router.routes[:] = [
     route for route in app.router.routes if getattr(route, "path", None) != "/health"
 ]

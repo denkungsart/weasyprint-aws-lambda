@@ -2,7 +2,7 @@ FROM public.ecr.aws/awsguru/aws-lambda-adapter:1.0.1 AS lambda-web-adapter
 
 FROM ghcr.io/schweizerischebundesbahnen/weasyprint-service:70.0.4
 
-ARG LAMBDA_WRAPPER_REVISION=4
+ARG LAMBDA_WRAPPER_REVISION=5
 
 # The upstream image ships no CA certificates, so WeasyPrint cannot verify TLS
 # when it loads external HTTPS resources.

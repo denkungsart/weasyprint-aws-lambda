@@ -16,7 +16,7 @@ existing PDF path during validation.
 
 - SBB WeasyPrint service: `70.0.4`
 - AWS Lambda Web Adapter: `1.0.1`
-- Lambda wrapper revision: `4`
+- Lambda wrapper revision: `5`
 - Application port: `9080`
 - Lambda invoke mode: `response_stream`
 
@@ -155,6 +155,18 @@ are still loaded by WeasyPrint itself.
 
 `EXTERNAL_RESOURCES_PREFETCH_WORKERS` sets how many images load at the same
 time (default `16`).
+
+## Compressed requests
+
+Lambda limits a buffered request payload to 6 MB, so long documents can exceed
+it as plain HTML. Clients may therefore send the body gzipped with
+`Content-Encoding: gzip`; HTML usually compresses more than tenfold. The
+wrapper inflates the body and removes the header before the upstream service
+reads it, and still accepts uncompressed requests. A body that is not valid
+gzip is rejected with `400`; one that inflates beyond
+`GZIP_REQUEST_MAX_INFLATED_BYTES` (default `67108864`, 64 MiB) with `413`, so a
+small upload cannot expand without bounds. Only a single `gzip` encoding is
+handled; other encodings reach the upstream service unchanged.
 
 ## Accessibility and migration notes
 

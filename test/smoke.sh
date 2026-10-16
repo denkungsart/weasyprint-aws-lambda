@@ -22,7 +22,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-for command in docker curl pdfimages pdfinfo pdftotext qpdf; do
+for command in docker curl gzip pdfimages pdfinfo pdftotext qpdf; do
   if ! command -v "${command}" >/dev/null 2>&1; then
     printf 'Required command is missing: %s\n' "${command}" >&2
     exit 1
@@ -160,6 +160,43 @@ grep -Eq '^Pages:[[:space:]]+1$' "${tmp_dir}/pdfinfo.txt"
 grep -Eq '^Page size:.*A4' "${tmp_dir}/pdfinfo.txt"
 grep -Fq 'This text must survive conversion and remain extractable.' "${tmp_dir}/smoke.txt"
 grep -Fq 'Native SVG rendering check' "${tmp_dir}/smoke.txt"
+
+# A gzipped body is inflated before conversion, so it renders the same
+# document. One that is not valid gzip, or that inflates beyond the limit, is
+# rejected before it reaches the upstream service.
+gzip -c "${fixture}" >"${tmp_dir}/fixture.html.gz"
+curl --fail --silent --show-error \
+  --request POST \
+  --header "X-API-Key: ${api_key}" \
+  --header 'Content-Type: text/html; charset=utf-8' \
+  --header 'Content-Encoding: gzip' \
+  --data-binary "@${tmp_dir}/fixture.html.gz" \
+  --output "${tmp_dir}/gzip.pdf" \
+  "${base_url}/convert/html?pdf_variant=pdf%2Fua-1&file_name=gzip.pdf"
+
+qpdf --check "${tmp_dir}/gzip.pdf" >/dev/null
+pdftotext "${tmp_dir}/gzip.pdf" "${tmp_dir}/gzip.txt"
+if ! grep -Fq 'This text must survive conversion and remain extractable.' "${tmp_dir}/gzip.txt"; then
+  printf 'The gzipped request did not convert to the expected document.\n' >&2
+  exit 1
+fi
+
+head -c 1000 "${fixture}" >"${tmp_dir}/not-gzip.bin"
+# 65 MiB of zeros, above the default 64 MiB limit, compressed to about 64 KB.
+head -c $((65 * 1024 * 1024)) /dev/zero | gzip -c >"${tmp_dir}/too-large.gz"
+for case in "not-gzip.bin:400" "too-large.gz:413"; do
+  body="${case%%:*}"
+  expected="${case##*:}"
+  status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    --request POST --header "X-API-Key: ${api_key}" \
+    --header 'Content-Type: text/html; charset=utf-8' \
+    --header 'Content-Encoding: gzip' \
+    --data-binary "@${tmp_dir}/${body}" "${base_url}/convert/html")"
+  if [[ "${status}" != "${expected}" ]]; then
+    printf 'Expected %s for the gzipped body %s, got: %s\n' "${expected}" "${body}" "${status}" >&2
+    exit 1
+  fi
+done
 
 # Images on a public HTTPS host must be fetched over verified TLS, loaded in
 # parallel before the conversion, and embedded rather than replaced by their alt
