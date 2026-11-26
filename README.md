@@ -76,12 +76,15 @@ dispatches the ECR workflow. The ECR workflow checks out that exact tag,
 rebuilds and smoke-tests it on ARM64, then pushes the already-tested local
 image.
 
-Publishing expects:
+Publishing runs in the `ecr-publish` GitHub environment, which only deploys
+from `main` and `v*` tags. It expects:
 
 - an ECR repository named `weasyprint-aws-lambda` in `eu-west-1`, configured
   with immutable tags;
-- an `AWS_IAM_ROLE` GitHub Actions secret containing the role ARN;
-- GitHub OIDC trust allowing this repository to assume that role;
+- an `AWS_IAM_ROLE` secret in the `ecr-publish` environment containing the
+  role ARN;
+- GitHub OIDC trust allowing this repository's `ecr-publish` environment to
+  assume that role;
 - ECR image lookup and upload permissions on the role.
 
 The workflow can also be dispatched manually with an existing combined-version
