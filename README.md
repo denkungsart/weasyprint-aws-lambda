@@ -76,13 +76,18 @@ dispatches the ECR workflow. The ECR workflow checks out that exact tag,
 rebuilds and smoke-tests it on ARM64, then pushes the already-tested local
 image.
 
-Publishing expects:
+Publishing runs in the `ecr-publish` GitHub environment, which only deploys
+from `main` and `v*` tags. terraform-devops manages the rest in the devops
+account (`960471713478`):
 
-- an ECR repository named `weasyprint-aws-lambda` in `eu-west-1`, configured
-  with immutable tags;
-- an `AWS_IAM_ROLE` GitHub Actions secret containing the role ARN;
-- GitHub OIDC trust allowing this repository to assume that role;
-- ECR image lookup and upload permissions on the role.
+- the ECR repository `weasyprint-aws-lambda` in `eu-west-1`, with immutable
+  tags, replicated to `eu-central-1` and `eu-south-1`;
+- the push role, which only trusts this repository's `ecr-publish`
+  environment and may only push to and read its own repository. Its ARN is
+  the environment secret `AWS_IAM_ROLE`.
+
+Organization accounts and their Lambda functions may pull the image; nobody
+else can.
 
 The workflow can also be dispatched manually with an existing combined-version
 tag. It refuses a tag that does not match the versions pinned in its Dockerfile.

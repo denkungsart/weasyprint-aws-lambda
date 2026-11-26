@@ -22,6 +22,9 @@ env:
 jobs:
   publish:
     runs-on: ubuntu-24.04-arm
+    # The push role in the devops account (terraform-devops) only trusts this
+    # environment, which only deploys from main and v* tags.
+    environment: ecr-publish
     timeout-minutes: 25
 
     steps:
